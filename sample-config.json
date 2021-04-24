@@ -1,0 +1,5 @@
+{
+    "owner": "vscodium",
+    "repo": "vscodium",
+    "signature_regex": "VSCodium-linux-.*\\.tar\\.gz\\.sha256"
+}

@@ -11,11 +11,11 @@
   "author": "Icelk <main@icelk.dev>",
   "license": "MIT",
   "devDependencies": {
+    "@types/child-process-promise": "^2.2.1",
+    "@types/node-fetch": "^2.5.10",
     "@types/node": "^14.14.41"
   },
   "dependencies": {
-    "@types/child-process-promise": "^2.2.1",
-    "@types/node-fetch": "^2.5.10",
     "child-process-promise": "^2.2.1",
     "node-fetch": "^2.6.1"
   }
