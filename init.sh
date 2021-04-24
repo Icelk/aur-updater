@@ -7,4 +7,4 @@ if [[ -z "$package" ]]; then
     exit 1
 fi
 
-git clone https://aur.archlinux.org/$package.git remote
+git clone ssh://aur.archlinux.org/$package.git remote
