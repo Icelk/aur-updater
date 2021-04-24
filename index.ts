@@ -194,6 +194,9 @@ async function updatePackage(response: any, regex: string, newTag: string) {
         }
     }
 
+    fs.promises.writeFile(`${packageGitPath}/PKGBUILD`, newPkgBuild)
+
+    // Execute makepkg after writing to PKGBUILD
     const makePkgOutput = await exec(
         `cd ${packageGitPath} && makepkg --printsrcinfo > .SRCINFO`
     )
@@ -203,6 +206,5 @@ async function updatePackage(response: any, regex: string, newTag: string) {
     if (makePkgOutput.stdout.length > 0) {
         console.error(makePkgOutput.stderr)
     }
-    fs.promises.writeFile(`${packageGitPath}/PKGBUILD`, newPkgBuild)
 }
 run()
