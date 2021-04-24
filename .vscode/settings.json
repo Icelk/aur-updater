@@ -1,5 +1,6 @@
 {
     "auto-start-terminal.commands": [
-        "tsc"
+        "tsc",
+        "watchexec -- rsync -rhP . server:/home/icelk/aur-updater"
     ]
 }
