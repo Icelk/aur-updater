@@ -1,0 +1,7 @@
+[Unit]
+Description=AUR package updater
+After=network-online.target
+
+[Service]
+ExecStart=sh -c "cd ~/aur-updater && npm start"
+Type=oneshot

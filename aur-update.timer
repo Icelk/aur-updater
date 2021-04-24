@@ -1,0 +1,9 @@
+[Unit]
+Description=AUR package updater timer
+
+[Timer]
+OnCalendar=hourly
+Persistent=false
+
+[Install]
+WantedBy=timers.target
