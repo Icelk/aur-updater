@@ -206,5 +206,35 @@ async function updatePackage(response: any, regex: string, newTag: string) {
     if (makePkgOutput.stdout.length > 0) {
         console.error(makePkgOutput.stderr)
     }
+
+    const diff = await exec("git diff", { cwd: "remote" })
+    const hasChanged = diff.stdout.length > 0
+
+    if (hasChanged) {
+        await exec("git add .", { cwd: "remote" })
+        await exec(`git commit -m 'Updated to ${newTag}'`, { cwd: "remote" })
+
+        const gitPushOutput = await exec("git push", { cwd: "remote" }).then(
+            (o) => {
+                return o
+            },
+            (err) => {
+                console.error("You don't have the permissions to push changes")
+                console.error(err)
+                return null
+            }
+        )
+        if (gitPushOutput === null) {
+            return
+        }
+        if (gitPushOutput.childProcess.exitCode !== 0) {
+            console.error("Failed to `git push`!")
+            console.error(gitPushOutput.stderr)
+        } else {
+            console.log("Pushed changes")
+        }
+    } else {
+        console.error("Nothing changed according to Git, yet we have updated!")
+    }
 }
 run()
