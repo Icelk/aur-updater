@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "module": "CommonJS",
+        "lib": [
+            "ESNext"
+        ],
+        "watch": true,
+        "strict": true,
+        "downlevelIteration": true,
+    },
+    "include": [
+        "index.ts"
+    ],
+}

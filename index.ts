@@ -1,0 +1,208 @@
+import fs = require("fs")
+import fetch = require("node-fetch")
+import { exec } from "child-process-promise"
+
+const packageGitPath = "remote"
+const currentTagNamePath = "latest"
+
+const request: (
+    method: "GET" | "POST" | "PUT",
+    url: string,
+    download?: boolean
+) => Promise<fetch.Response> = async (method, url, download = false) => {
+    const uri = url.startsWith("http") ? url : `https://api.github.com${url}`
+    return await fetch.default(uri, {
+        method,
+        headers: {
+            accept: download
+                ? "application/octet-stream"
+                : "application/vnd.github.v3+json",
+            agent: "AUR updates",
+        },
+    })
+}
+
+enum Arch {
+    x86_64,
+    i686,
+    aarch64,
+    armv7h,
+}
+function firstArchSubstring(text: string): Arch | null {
+    const associations = [
+        [Arch.x86_64, "x64"],
+        [Arch.x86_64, "x86_64"],
+        [Arch.x86_64, "x86-64"],
+        [Arch.i686, "i386"],
+        [Arch.i686, "i486"],
+        [Arch.i686, "i586"],
+        [Arch.i686, "i686"],
+        [Arch.i686, "x86-32"],
+        [Arch.i686, "x86_32"],
+        [Arch.i686, "ia32"],
+
+        [Arch.aarch64, "aarch64"],
+        [Arch.aarch64, "arm64"],
+        [Arch.armv7h, "armv7h"],
+        [Arch.armv7h, "armhf"],
+        [Arch.i686, "x86"],
+    ]
+    for (let i = 0; i < associations.length; i++) {
+        const association = associations[i]
+        if (text.indexOf(association[1] as string) >= 0) {
+            return association[0] as Arch
+        }
+    }
+    return null
+}
+
+async function run() {
+    const config = JSON.parse(
+        (await fs.promises.readFile("config.json")).toString()
+    ) as { repo?: string; owner?: string; signature_regex?: string }
+
+    if (
+        config.repo === undefined ||
+        config.owner === undefined ||
+        config.signature_regex === undefined
+    ) {
+        console.error(
+            "Missing fields from configuration. Requires `repo`, `owner`, and `signature_regex`."
+        )
+        process.exit(1)
+    }
+
+    const latestFile = fs.promises.readFile(currentTagNamePath).catch(() => {
+        return Buffer.allocUnsafe(0)
+    })
+    const latestSynced = (await latestFile).toString("utf8")
+
+    const currentState = await (
+        await request(
+            "GET",
+            `/repos/${config.owner}/${config.repo}/releases/latest`
+        )
+    ).json()
+    const remoteTag = currentState.tag_name
+    const update = remoteTag !== latestSynced
+
+    if (update) {
+        await updatePackage(currentState, config.signature_regex, remoteTag)
+        await fs.promises.writeFile(currentTagNamePath, remoteTag)
+    }
+}
+async function updatePackage(response: any, regex: string, newTag: string) {
+    const pkgBuildRegex = /pkgver=.*/
+    const pkgBuild = (
+        await fs.promises.readFile(`${packageGitPath}/PKGBUILD`)
+    ).toString("utf8")
+    // Update PKGBUILD pkgver
+    let newPkgBuild = pkgBuild.replace(pkgBuildRegex, `pkgver=${newTag}`)
+
+    const signatureRegex = new RegExp(regex)
+    const pkgBuildSignatureRegex = /sha(256|512)sums/g
+    const assets: { name: string; url: string }[] = response.assets
+
+    const arches: { arch: Arch; sigStart: number; sigEnd: number }[] = []
+    for (const match of newPkgBuild.matchAll(pkgBuildSignatureRegex)) {
+        if (match.index === undefined || match.length === 0) {
+            console.log("no signature fields, skipping")
+            break
+        }
+        const end = match.index + match[0].length
+        // console.log(newPkgBuild.substring(end - 5))
+
+        if (newPkgBuild.substring(end, end + 1) !== "_") {
+            console.warn(
+                "signature definition without explicit arches are not supported"
+            )
+            continue
+        }
+
+        const s = newPkgBuild.substring(end)
+        const eq = s.search(/[=]/)
+        const arch = firstArchSubstring(s.substring(0, eq))
+        const sigStart = s.search(/["']/) + 1
+        const sigEnd = s.substring(sigStart).search(/["']/) + sigStart
+
+        if (arch === null) {
+            console.warn("Arch '" + s.substring(0, eq) + "' not recognised.")
+            continue
+        }
+
+        console.log(
+            `Found arch sum '${arch}' with sum ${s.substring(sigStart, sigEnd)}`
+        )
+
+        arches.push({
+            arch,
+            sigStart: sigStart + end,
+            sigEnd: sigEnd + end,
+        })
+    }
+
+    if (arches.length > 0) {
+        const replaceSum = (start: number, end: number, newSum: string) => {
+            console.log(`Replacing sum ${newPkgBuild.substring(start, end)}`)
+
+            newPkgBuild = `${newPkgBuild.substring(
+                0,
+                start
+            )}${newSum}${newPkgBuild.substring(end)}`
+
+            const offset = start - end + newSum.length
+            for (let i = 0; i < arches.length; i++) {
+                const arch = arches[i]
+                if (arch.sigStart > end) {
+                    arch.sigStart += offset
+                    arch.sigEnd += offset
+                }
+            }
+        }
+        const getReplaceSum = async (
+            start: number,
+            end: number,
+            url: string
+        ) => {
+            const response = await request("GET", url, true)
+            const sum = await (await response.text()).split(" ")[0]
+            console.log("Got sum " + sum)
+
+            replaceSum(start, end, sum)
+        }
+
+        for (let assetIndex = 0; assetIndex < assets.length; assetIndex++) {
+            const asset = assets[assetIndex]
+
+            const name = asset.name
+            if (!signatureRegex.test(name)) {
+                continue
+            }
+            console.log("Applicable asset: " + name)
+
+            const firstArch = firstArchSubstring(name)
+
+            for (let archIndex = 0; archIndex < arches.length; archIndex++) {
+                const arch = arches[archIndex]
+
+                if (arch.arch === firstArch) {
+                    const url = asset.url
+
+                    getReplaceSum(arch.sigStart, arch.sigEnd, url)
+                }
+            }
+        }
+    }
+
+    const makePkgOutput = await exec(
+        `cd ${packageGitPath} && makepkg --printsrcinfo > .SRCINFO`
+    )
+    if (makePkgOutput.childProcess.exitCode !== 0) {
+        console.error("makepkg failed!")
+    }
+    if (makePkgOutput.stdout.length > 0) {
+        console.error(makePkgOutput.stderr)
+    }
+    fs.promises.writeFile(`${packageGitPath}/PKGBUILD`, newPkgBuild)
+}
+run()
