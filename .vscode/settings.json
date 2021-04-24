@@ -1,0 +1,5 @@
+{
+    "auto-start-terminal.commands": [
+        "tsc"
+    ]
+}
