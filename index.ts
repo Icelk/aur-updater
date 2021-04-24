@@ -212,7 +212,10 @@ async function updatePackage(response: any, regex: string, newTag: string) {
 
     if (hasChanged) {
         await exec("git add .", { cwd: "remote" })
-        await exec(`git commit -m 'Updated to ${newTag}'`, { cwd: "remote" })
+        await exec(
+            `git commit -m 'Updated to ${newTag}\nThis was an auto-update by https://github.com/Icelk/aur-updater'`,
+            { cwd: "remote" }
+        )
 
         const gitPushOutput = await exec("git push", { cwd: "remote" }).then(
             (o) => {
