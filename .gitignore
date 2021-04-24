@@ -1,0 +1,7 @@
+node_modules
+
+config.json
+# The remote repo
+remote
+# Latest version synced, saved to a file
+latest
