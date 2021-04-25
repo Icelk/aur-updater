@@ -2,5 +2,9 @@
 {
     "owner": "vscodium",
     "repo": "vscodium",
-    "signature_regex": "VSCodium-linux-.*\\.tar\\.gz\\.sha256"
+    "signature_regex": "VSCodium-linux-.*\\.tar\\.gz\\.sha256",
+    "dry_run": true
+    // Additionally
+    // - the `pkgbuild` key can specify which file contains PKGBUILD info. Defaults to `PKGBUILD`
+    // - `srcinfo` represents the path to the file which to output .SRCINFO to
 }

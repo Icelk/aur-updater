@@ -131,7 +131,7 @@ async function updatePackage(
     dryRun: boolean
 ) {
     const pkgBuild = (
-        await fs.promises.readFile(`${packageGitPath}/PKGBUILD`)
+        await fs.promises.readFile(`${packageGitPath}/${pkgBuildPath}`)
     ).toString("utf8")
     // Update PKGBUILD pkgver
     let newPkgBuild = pkgBuild.replace(pkgBuildVerRegex, `pkgver=${newTag}`)
