@@ -1,6 +1,6 @@
 import fs = require("fs")
 import fetch = require("node-fetch")
-import { exec, execFile } from "child-process-promise"
+import { execFile } from "child-process-promise"
 
 const packageGitPath = "remote"
 const pkgBuildVerRegex = /pkgver=.*/
@@ -110,10 +110,26 @@ async function run() {
         if (verAfterPull === remoteTag) {
             return
         }
-        await updatePackage(githubData, config.signature_regex, remoteTag)
+        await updatePackage(
+            gitPath,
+            githubData,
+            config.signature_regex,
+            remoteTag,
+            pkgBuildPath,
+            config.srcinfo ?? ".SRCINFO",
+            config.dry_run ?? false
+        )
     }
 }
-async function updatePackage(response: any, regex: string, newTag: string) {
+async function updatePackage(
+    remotePath: string,
+    response: any,
+    regex: string,
+    newTag: string,
+    pkgBuildPath: string,
+    srcInfoPath: string,
+    dryRun: boolean
+) {
     const pkgBuild = (
         await fs.promises.readFile(`${packageGitPath}/PKGBUILD`)
     ).toString("utf8")
@@ -121,17 +137,18 @@ async function updatePackage(response: any, regex: string, newTag: string) {
     let newPkgBuild = pkgBuild.replace(pkgBuildVerRegex, `pkgver=${newTag}`)
 
     const signatureRegex = new RegExp(regex)
-    const pkgBuildSignatureRegex = /sha([0-9]+)sums/g
+    const pkgBuildSumRegex = /sha([0-9]+)sums/g
     const assets: { name: string; url: string }[] = response.assets
 
     const arches: { arch: Arch; sigStart: number; sigEnd: number }[] = []
-    for (const match of newPkgBuild.matchAll(pkgBuildSignatureRegex)) {
+    const sumMatches = newPkgBuild.matchAll(pkgBuildSumRegex)
+    let numSumMatches = 0
+    for (const match of sumMatches) {
         if (match.index === undefined || match.length === 0) {
             console.log("no signature fields, skipping")
             break
         }
         const end = match.index + match[0].length
-        // console.log(newPkgBuild.substring(end - 5))
 
         if (newPkgBuild.substring(end, end + 1) !== "_") {
             console.warn(
@@ -160,6 +177,14 @@ async function updatePackage(response: any, regex: string, newTag: string) {
             sigStart: sigStart + end,
             sigEnd: sigEnd + end,
         })
+        numSumMatches += 1
+    }
+
+    if (arches.length !== numSumMatches) {
+        console.error(
+            "Number of architecture sums and number of matches are not equal"
+        )
+        process.exit(1)
     }
 
     if (arches.length > 0) {
@@ -186,7 +211,7 @@ async function updatePackage(response: any, regex: string, newTag: string) {
             url: string
         ) => {
             const response = await request("GET", url, true)
-            const sum = await (await response.text()).split(" ")[0]
+            const sum = (await response.text()).split(" ")[0]
             console.log("Got sum " + sum)
 
             replaceSum(start, end, sum)
@@ -215,50 +240,75 @@ async function updatePackage(response: any, regex: string, newTag: string) {
         }
     }
 
-    fs.promises.writeFile(`${packageGitPath}/PKGBUILD`, newPkgBuild)
+    if (!dryRun) {
+        fs.promises.writeFile(`${remotePath}/${pkgBuildPath}`, newPkgBuild)
 
-    // Execute makepkg after writing to PKGBUILD
-    const makePkgOutput = await exec(
-        `cd ${packageGitPath} && makepkg --printsrcinfo > .SRCINFO`
-    )
-    if (makePkgOutput.childProcess.exitCode !== 0) {
-        console.error("makepkg failed!")
-    }
-    if (makePkgOutput.stdout.length > 0) {
-        console.error(makePkgOutput.stderr)
-    }
+        // Execute makepkg after writing to PKGBUILD
+        const makePkgOutput = await execFile("makepkg", ["--printsrcinfo"], {
+            cwd: remotePath,
+            encoding: "utf8",
+        })
+        if (makePkgOutput.childProcess.exitCode !== 0) {
+            console.error("makepkg failed!")
+            console.error(makePkgOutput.stderr)
 
-    const diff = await exec("git diff", { cwd: "remote" })
-    const hasChanged = diff.stdout.length > 0
-
-    if (hasChanged) {
-        await exec("git add .", { cwd: "remote" })
-        await exec(
-            `git commit -m 'Updated to ${newTag}\nThis was an auto-update by https://github.com/Icelk/aur-updater'`,
-            { cwd: "remote" }
-        )
-
-        const gitPushOutput = await exec("git push", { cwd: "remote" }).then(
-            (o) => {
-                return o
-            },
-            (err) => {
-                console.error("You don't have the permissions to push changes")
-                console.error(err)
-                return null
-            }
-        )
-        if (gitPushOutput === null) {
-            return
-        }
-        if (gitPushOutput.childProcess.exitCode !== 0) {
-            console.error("Failed to `git push`!")
-            console.error(gitPushOutput.stderr)
+            process.exit(1)
         } else {
-            console.log("Pushed changes")
+            await fs.promises.writeFile(
+                `${remotePath}/${srcInfoPath}`,
+                makePkgOutput.stdout
+            )
         }
-    } else {
-        console.error("Nothing changed according to Git, yet we have updated!")
+        const diff = await execFile("git", ["diff"], {
+            cwd: "remote",
+            encoding: "utf8",
+        })
+        const hasChanged = diff.stdout.length > 0
+
+        if (hasChanged) {
+            await execFile("git", ["add", "."], {
+                cwd: "remote",
+                encoding: "utf8",
+            })
+            await execFile(
+                "git",
+                [
+                    "commit",
+                    "-m",
+                    `Updated to ${newTag}\nThis was an auto-update by https://github.com/Icelk/aur-updater`,
+                ],
+                { cwd: "remote", encoding: "utf8" }
+            )
+
+            const gitPushOutput = await execFile("git", ["push"], {
+                cwd: "remote",
+                encoding: "utf8",
+            }).then(
+                (o) => {
+                    return o
+                },
+                (err) => {
+                    console.error(
+                        "You don't have the permissions to push changes"
+                    )
+                    console.error(err)
+                    return null
+                }
+            )
+            if (gitPushOutput === null) {
+                return
+            }
+            if (gitPushOutput.childProcess.exitCode !== 0) {
+                console.error("Failed to `git push`!")
+                console.error(gitPushOutput.stderr)
+            } else {
+                console.log("Pushed changes")
+            }
+        } else {
+            console.error(
+                "Nothing changed according to Git, yet we have updated!"
+            )
+        }
     }
 }
 run()
