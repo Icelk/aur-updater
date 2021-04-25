@@ -2,6 +2,8 @@ import fs = require("fs")
 import fetch = require("node-fetch")
 import { execFile } from "child-process-promise"
 
+let forceUpdate = false
+
 const packageGitPath = "remote"
 const pkgBuildVerRegex = /pkgver=.*/
 
@@ -60,27 +62,62 @@ function findPkgVer(file: string): string | null {
     if (matches === null) {
         return null
     } else {
-        return matches[0]
+        return matches[0].split("pkgver=")[1]
     }
 }
 
+type GenericObject = { [key: string]: any }
+
 async function run() {
-    const config = JSON.parse(
+    const config: GenericObject = JSON.parse(
         (await fs.promises.readFile("config.json")).toString()
     )
 
-    const gitPath = packageGitPath
-
-    if (
-        config.repo === undefined ||
-        config.owner === undefined ||
-        config.signature_regex === undefined
-    ) {
-        console.error(
-            "Missing fields from configuration. Requires `repo`, `owner`, and `signature_regex`."
-        )
+    const globalConfig: GenericObject =
+        typeof config.global === "object" ? config.global : {}
+    if (typeof config.packages !== "object") {
+        console.error("Config has to have an array of packages!")
         process.exit(1)
     }
+
+    let exitStatus = 0
+
+    config.packages.forEach(async (pkg: GenericObject) => {
+        const pkgConfig = Object.assign({}, globalConfig, pkg)
+        console.log(
+            "Processing package " +
+                pkgConfig.name +
+                " with config " +
+                JSON.stringify(pkgConfig, null, 2)
+        )
+
+        const newExitStatus = await processPackage(pkgConfig)
+        if (exitStatus === 0) {
+            exitStatus = newExitStatus
+        }
+
+        if (newExitStatus !== 0) {
+            console.error("Failed to process package. See output above.")
+        }
+    })
+
+    if (exitStatus !== 0) {
+        process.exit(exitStatus)
+    }
+}
+async function processPackage(config: any): Promise<number> {
+    if (
+        config.name === undefined ||
+        config.repo === undefined ||
+        config.owner === undefined
+    ) {
+        console.error(
+            "Missing fields in configuration. Requires `name`, `repo`, and `owner`."
+        )
+        return 1
+    }
+
+    const gitPath = `${packageGitPath}-${config.name}`
 
     const pkgBuildPath = config.pkgbuild ?? "PKGBUILD"
 
@@ -97,31 +134,45 @@ async function run() {
         )
     ).json()
     const remoteTag = githubData.tag_name
-    const update = remoteTag !== latestSynced
+    const update = remoteTag !== latestSynced || forceUpdate
 
     if (update) {
-        await execFile("git", ["pull"], { cwd: gitPath, encoding: "utf8" })
+        if (!(config.dry_run ?? false)) {
+            await execFile("git", ["pull"], { cwd: gitPath, encoding: "utf8" })
+        }
 
         pkgBuild = (
             await fs.promises.readFile(`${gitPath}/${pkgBuildPath}`)
         ).toString()
 
         const verAfterPull = findPkgVer(pkgBuild)
-        if (verAfterPull === remoteTag) {
-            return
+        if (verAfterPull === remoteTag && !forceUpdate) {
+            return 0
         }
-        await updatePackage(
+
+        console.log(
+            "Updating package. Current: " +
+                verAfterPull +
+                " Newest: " +
+                remoteTag
+        )
+
+        return await updatePackage(
+            config.name,
             gitPath,
             githubData,
-            config.signature_regex,
+            config.sum_filter_regex ?? "",
             remoteTag,
             pkgBuildPath,
             config.srcinfo ?? ".SRCINFO",
             config.dry_run ?? false
         )
     }
+
+    return 0
 }
 async function updatePackage(
+    pkgName: string,
     remotePath: string,
     response: any,
     regex: string,
@@ -129,9 +180,9 @@ async function updatePackage(
     pkgBuildPath: string,
     srcInfoPath: string,
     dryRun: boolean
-) {
+): Promise<number> {
     const pkgBuild = (
-        await fs.promises.readFile(`${packageGitPath}/${pkgBuildPath}`)
+        await fs.promises.readFile(`${remotePath}/${pkgBuildPath}`)
     ).toString("utf8")
     // Update PKGBUILD pkgver
     let newPkgBuild = pkgBuild.replace(pkgBuildVerRegex, `pkgver=${newTag}`)
@@ -142,17 +193,17 @@ async function updatePackage(
 
     const arches: { arch: Arch; sigStart: number; sigEnd: number }[] = []
     const sumMatches = newPkgBuild.matchAll(pkgBuildSumRegex)
-    let numSumMatches = 0
     for (const match of sumMatches) {
         if (match.index === undefined || match.length === 0) {
-            console.log("no signature fields, skipping")
+            console.log(pkgName + ": no signature fields, skipping")
             break
         }
         const end = match.index + match[0].length
 
         if (newPkgBuild.substring(end, end + 1) !== "_") {
             console.warn(
-                "signature definition without explicit arches are not supported"
+                pkgName +
+                    ": signature definition without explicit arches are not supported"
             )
             continue
         }
@@ -164,12 +215,17 @@ async function updatePackage(
         const sigEnd = s.substring(sigStart).search(/["']/) + sigStart
 
         if (arch === null) {
-            console.warn("Arch '" + s.substring(0, eq) + "' not recognised.")
+            console.warn(
+                pkgName + ": Arch '" + s.substring(0, eq) + "' not recognised."
+            )
             continue
         }
 
         console.log(
-            `Found arch sum '${arch}' with sum ${s.substring(sigStart, sigEnd)}`
+            `${pkgName}: Found arch sum '${arch}' with sum ${s.substring(
+                sigStart,
+                sigEnd
+            )}`
         )
 
         arches.push({
@@ -177,19 +233,14 @@ async function updatePackage(
             sigStart: sigStart + end,
             sigEnd: sigEnd + end,
         })
-        numSumMatches += 1
     }
 
-    if (arches.length !== numSumMatches) {
-        console.error(
-            "Number of architecture sums and number of matches are not equal"
-        )
-        process.exit(1)
-    }
-
+    let numSumMatches = 0
     if (arches.length > 0) {
         const replaceSum = (start: number, end: number, newSum: string) => {
-            console.log(`Replacing sum ${newPkgBuild.substring(start, end)}`)
+            console.log(
+                `${pkgName}: Replacing sum ${newPkgBuild.substring(start, end)}`
+            )
 
             newPkgBuild = `${newPkgBuild.substring(
                 0,
@@ -212,7 +263,7 @@ async function updatePackage(
         ) => {
             const response = await request("GET", url, true)
             const sum = (await response.text()).split(" ")[0]
-            console.log("Got sum " + sum)
+            console.log(pkgName + ": Got sum " + sum)
 
             replaceSum(start, end, sum)
         }
@@ -224,7 +275,7 @@ async function updatePackage(
             if (!signatureRegex.test(name)) {
                 continue
             }
-            console.log("Applicable asset: " + name)
+            console.log(pkgName + ": Applicable asset: " + name)
 
             const firstArch = firstArchSubstring(name)
 
@@ -235,9 +286,17 @@ async function updatePackage(
                     const url = asset.url
 
                     getReplaceSum(arch.sigStart, arch.sigEnd, url)
+                    numSumMatches += 1
                 }
             }
         }
+    }
+    if (arches.length !== numSumMatches) {
+        console.error(
+            pkgName +
+                ": Number of architecture sums and number of matches are not equal"
+        )
+        return 1
     }
 
     if (!dryRun) {
@@ -249,10 +308,10 @@ async function updatePackage(
             encoding: "utf8",
         })
         if (makePkgOutput.childProcess.exitCode !== 0) {
-            console.error("makepkg failed!")
+            console.error(pkgName + ": makepkg failed!")
             console.error(makePkgOutput.stderr)
 
-            process.exit(1)
+            return 1
         } else {
             await fs.promises.writeFile(
                 `${remotePath}/${srcInfoPath}`,
@@ -260,14 +319,14 @@ async function updatePackage(
             )
         }
         const diff = await execFile("git", ["diff"], {
-            cwd: "remote",
+            cwd: remotePath,
             encoding: "utf8",
         })
         const hasChanged = diff.stdout.length > 0
 
         if (hasChanged) {
             await execFile("git", ["add", "."], {
-                cwd: "remote",
+                cwd: remotePath,
                 encoding: "utf8",
             })
             await execFile(
@@ -277,11 +336,11 @@ async function updatePackage(
                     "-m",
                     `Updated to ${newTag}\nThis was an auto-update by https://github.com/Icelk/aur-updater`,
                 ],
-                { cwd: "remote", encoding: "utf8" }
+                { cwd: remotePath, encoding: "utf8" }
             )
 
             const gitPushOutput = await execFile("git", ["push"], {
-                cwd: "remote",
+                cwd: remotePath,
                 encoding: "utf8",
             }).then(
                 (o) => {
@@ -289,26 +348,35 @@ async function updatePackage(
                 },
                 (err) => {
                     console.error(
-                        "You don't have the permissions to push changes"
+                        pkgName +
+                            ": You don't have the permissions to push changes"
                     )
                     console.error(err)
                     return null
                 }
             )
             if (gitPushOutput === null) {
-                return
+                return 1
             }
             if (gitPushOutput.childProcess.exitCode !== 0) {
-                console.error("Failed to `git push`!")
+                console.error(pkgName + ": Failed to `git push`!")
                 console.error(gitPushOutput.stderr)
             } else {
-                console.log("Pushed changes")
+                console.log(pkgName + ": Pushed changes")
             }
         } else {
             console.error(
-                "Nothing changed according to Git, yet we have updated!"
+                pkgName +
+                    ": Nothing changed according to Git, yet we have updated!"
             )
         }
     }
+    return 0
 }
-run()
+
+forceUpdate = process.argv.indexOf("--force-update") > 1
+
+let f = async () => {
+    run()
+}
+f()

@@ -1,10 +1,29 @@
 // Copy to `config.json`, remove comments, and change appropriate values to get started
 {
-    "owner": "vscodium",
-    "repo": "vscodium",
-    "signature_regex": "VSCodium-linux-.*\\.tar\\.gz\\.sha256",
-    "dry_run": true
-    // Additionally
-    // - the `pkgbuild` key can specify which file contains PKGBUILD info. Defaults to `PKGBUILD`
-    // - `srcinfo` represents the path to the file which to output .SRCINFO to
+    // Global configuration. Supports all the flags for each package except for `name`, `repo`, `owner`, and `sum_filter_regex`. The separate packages configs have priority
+    "global": {
+        "pkgbuild": "PKGBUILD"
+    },
+    // List of packages to try to update
+    "packages": [
+        {
+            // Name of AUR package. Used to get path of remote downloaded by `init.sh`. Tries to read remote-<name>
+            "name": "vscodium-bin",
+
+            // GitHub owner of repo
+            "owner": "vscodium",
+            // GitHub repo
+            "repo": "vscodium",
+            // ↑ Together used to get info about repo.
+
+            // RegExp to filter `GitHub assets` to get the sums bundled with the binary
+            "sum_filter_regex": "VSCodium-linux-.*\\.tar\\.gz\\.sha256",
+
+            "dry_run": true
+
+            // Additionally,
+            // - the `pkgbuild` key can specify which file contains PKGBUILD info. Defaults to `PKGBUILD`
+            // - `srcinfo` represents the path to the file which to output .SRCINFO to
+        }
+    ]
 }

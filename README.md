@@ -27,3 +27,4 @@ Also see `Caveats` above.
 -   [ ] [Support for additional architectures](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=paru)
 -   [ ] Config options for git commands
 -   [ ] Sums have a regex filter in the config. Can this be replaced by reading the PKGBUILD for info about assets and searching for related assets from GitHub
+-   [ ] Authentication to increase the GitHub rate limit

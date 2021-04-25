@@ -3,6 +3,6 @@ node_modules
 
 config.json
 # The remote repo
-remote
+remote-*
 # Latest version synced, saved to a file
 latest
