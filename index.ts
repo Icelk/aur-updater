@@ -182,7 +182,8 @@ async function processPackage(config: any): Promise<number> {
             remoteTag,
             pkgBuildPath,
             config.srcinfo ?? ".SRCINFO",
-            config.dry_run ?? false
+            config.dry_run ?? false,
+            config.post_update ?? null
         )
     }
 
@@ -196,7 +197,8 @@ async function updatePackage(
     newTag: string,
     pkgBuildPath: string,
     srcInfoPath: string,
-    dryRun: boolean
+    dryRun: boolean,
+    postScript: string | null
 ): Promise<number> {
     const pkgBuild = (
         await fs.promises.readFile(`${remotePath}/${pkgBuildPath}`)
@@ -400,6 +402,13 @@ async function updatePackage(
                     ": Nothing changed according to Git, yet we have updated!"
             )
         }
+    }
+    if (postScript !== null) {
+        let env = process.env
+        env.AUR_PKGBUILD = newPkgBuild
+        env.AUR_VERSION_NEW = newTag
+        env.AUR_NAME = pkgName
+        await execFile("sh", ["-c", postScript], { env, encoding: "utf8" })
     }
     return 0
 }

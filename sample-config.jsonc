@@ -1,6 +1,6 @@
-// Copy to `config.json`, remove comments, and change appropriate values to get started
+// Copy to `config.json`, change appropriate values, and remove comments to get started
 {
-    // Authentication using a GitHub PAT. Optional.
+    // Authentication using a GitHub PAT. Optional, but increases limit from 60 requests per hour to 5000.
     "token": "YOUR GITHUB PERSONAL ACCESS TOKEN HERE",
     // Global configuration. Supports all the flags for each package except for `name`, `repo`, `owner`, and `sum_filter_regex`. The separate packages configs have priority
     "global": {
@@ -21,7 +21,17 @@
             // RegExp to filter `GitHub assets` to get the sums bundled with the binary
             "sum_filter_regex": "VSCodium-linux-.*\\.tar\\.gz\\.sha256",
 
-            "dry_run": true
+            // If we shouldn't mutate any data on disk. Still runs `post_update`
+            "dry_run": true,
+
+            // Run after update. This is run in a `sh` shell.
+            // The following environment variables are provided, in addition to the ones provided to NodeJS
+            // - AUR_VERSION_NEW - The new version tag
+            // - AUR_PKGBUILD - new content of PKGBUILD
+            // - AUR_NAME - name of package
+            // 
+            // stderr or stdout are not handled, so `echo` won't do anything.
+            "post_update": "notify-send 'Upgraded to $AUR_VERSION_NEW'"
 
             // Additionally,
             // - the `pkgbuild` key can specify which file contains PKGBUILD info. Defaults to `PKGBUILD`
