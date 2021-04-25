@@ -7,20 +7,29 @@ let forceUpdate = false
 const packageGitPath = "remote"
 const pkgBuildVerRegex = /pkgver=.*/
 
+let token: string | null = null
+
 const request: (
     method: "GET" | "POST" | "PUT",
     url: string,
     download?: boolean
 ) => Promise<fetch.Response> = async (method, url, download = false) => {
     const uri = url.startsWith("http") ? url : `https://api.github.com${url}`
+
+    let headers: { [name: string]: string } = {
+        accept: download
+            ? "application/octet-stream"
+            : "application/vnd.github.v3+json",
+        agent: "AUR updates",
+    }
+
+    if (token !== null) {
+        headers.authorization = "Token " + token
+    }
+
     return await fetch.default(uri, {
         method,
-        headers: {
-            accept: download
-                ? "application/octet-stream"
-                : "application/vnd.github.v3+json",
-            agent: "AUR updates",
-        },
+        headers,
     })
 }
 
@@ -73,6 +82,8 @@ async function run() {
         (await fs.promises.readFile("config.json")).toString()
     )
 
+    token = config.token ?? null
+
     const globalConfig: GenericObject =
         typeof config.global === "object" ? config.global : {}
     if (typeof config.packages !== "object") {
@@ -104,6 +115,8 @@ async function run() {
     if (exitStatus !== 0) {
         process.exit(exitStatus)
     }
+
+    token = null
 }
 async function processPackage(config: any): Promise<number> {
     if (
@@ -128,9 +141,9 @@ async function processPackage(config: any): Promise<number> {
     const latestSynced = findPkgVer(pkgBuild)
 
     const githubResponse = await request(
-            "GET",
-            `/repos/${config.owner}/${config.repo}/releases/latest`
-        )
+        "GET",
+        `/repos/${config.owner}/${config.repo}/releases/latest`
+    )
     if (githubResponse.status !== 200) {
         console.error("Received error from GitHub:")
         console.error(JSON.stringify(await githubResponse.json(), null, 2))

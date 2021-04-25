@@ -1,5 +1,7 @@
 // Copy to `config.json`, remove comments, and change appropriate values to get started
 {
+    // Authentication using a GitHub PAT. Optional.
+    "token": "YOUR GITHUB PERSONAL ACCESS TOKEN HERE",
     // Global configuration. Supports all the flags for each package except for `name`, `repo`, `owner`, and `sum_filter_regex`. The separate packages configs have priority
     "global": {
         "pkgbuild": "PKGBUILD"
