@@ -127,12 +127,16 @@ async function processPackage(config: any): Promise<number> {
 
     const latestSynced = findPkgVer(pkgBuild)
 
-    const githubData = await (
-        await request(
+    const githubResponse = await request(
             "GET",
             `/repos/${config.owner}/${config.repo}/releases/latest`
         )
-    ).json()
+    if (githubResponse.status !== 200) {
+        console.error("Received error from GitHub:")
+        console.error(JSON.stringify(await githubResponse.json(), null, 2))
+        return 1
+    }
+    const githubData = await githubResponse.json()
     const remoteTag = githubData.tag_name
     const update = remoteTag !== latestSynced || forceUpdate
 
@@ -260,12 +264,18 @@ async function updatePackage(
             start: number,
             end: number,
             url: string
-        ) => {
+        ): Promise<number> => {
             const response = await request("GET", url, true)
+            if (response.status !== 200) {
+                console.error("Received error from GitHub:")
+                console.error(JSON.stringify(await response.json(), null, 2))
+                return 1
+            }
             const sum = (await response.text()).split(" ")[0]
             console.log(pkgName + ": Got sum " + sum)
 
             replaceSum(start, end, sum)
+            return 0
         }
 
         for (let assetIndex = 0; assetIndex < assets.length; assetIndex++) {
@@ -285,7 +295,14 @@ async function updatePackage(
                 if (arch.arch === firstArch) {
                     const url = asset.url
 
-                    getReplaceSum(arch.sigStart, arch.sigEnd, url)
+                    const status = await getReplaceSum(
+                        arch.sigStart,
+                        arch.sigEnd,
+                        url
+                    )
+                    if (status !== 0) {
+                        return status
+                    }
                     numSumMatches += 1
                 }
             }
