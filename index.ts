@@ -1,9 +1,9 @@
 import fs = require("fs")
 import fetch = require("node-fetch")
-import { exec } from "child-process-promise"
+import { exec, execFile } from "child-process-promise"
 
 const packageGitPath = "remote"
-const currentTagNamePath = "latest"
+const pkgBuildVerRegex = /pkgver=.*/
 
 const request: (
     method: "GET" | "POST" | "PUT",
@@ -55,11 +55,21 @@ function firstArchSubstring(text: string): Arch | null {
     }
     return null
 }
+function findPkgVer(file: string): string | null {
+    const matches = file.match(pkgBuildVerRegex)
+    if (matches === null) {
+        return null
+    } else {
+        return matches[0]
+    }
+}
 
 async function run() {
     const config = JSON.parse(
         (await fs.promises.readFile("config.json")).toString()
-    ) as { repo?: string; owner?: string; signature_regex?: string }
+    )
+
+    const gitPath = packageGitPath
 
     if (
         config.repo === undefined ||
@@ -72,35 +82,46 @@ async function run() {
         process.exit(1)
     }
 
-    const latestFile = fs.promises.readFile(currentTagNamePath).catch(() => {
-        return Buffer.allocUnsafe(0)
-    })
-    const latestSynced = (await latestFile).toString("utf8")
+    const pkgBuildPath = config.pkgbuild ?? "PKGBUILD"
 
-    const currentState = await (
+    let pkgBuild = (
+        await fs.promises.readFile(`${gitPath}/${pkgBuildPath}`)
+    ).toString()
+
+    const latestSynced = findPkgVer(pkgBuild)
+
+    const githubData = await (
         await request(
             "GET",
             `/repos/${config.owner}/${config.repo}/releases/latest`
         )
     ).json()
-    const remoteTag = currentState.tag_name
+    const remoteTag = githubData.tag_name
     const update = remoteTag !== latestSynced
 
     if (update) {
-        await updatePackage(currentState, config.signature_regex, remoteTag)
-        await fs.promises.writeFile(currentTagNamePath, remoteTag)
+        await execFile("git", ["pull"], { cwd: gitPath, encoding: "utf8" })
+
+        pkgBuild = (
+            await fs.promises.readFile(`${gitPath}/${pkgBuildPath}`)
+        ).toString()
+
+        const verAfterPull = findPkgVer(pkgBuild)
+        if (verAfterPull === remoteTag) {
+            return
+        }
+        await updatePackage(githubData, config.signature_regex, remoteTag)
     }
 }
 async function updatePackage(response: any, regex: string, newTag: string) {
-    const pkgBuildRegex = /pkgver=.*/
     const pkgBuild = (
         await fs.promises.readFile(`${packageGitPath}/PKGBUILD`)
     ).toString("utf8")
     // Update PKGBUILD pkgver
-    let newPkgBuild = pkgBuild.replace(pkgBuildRegex, `pkgver=${newTag}`)
+    let newPkgBuild = pkgBuild.replace(pkgBuildVerRegex, `pkgver=${newTag}`)
 
     const signatureRegex = new RegExp(regex)
-    const pkgBuildSignatureRegex = /sha(256|512)sums/g
+    const pkgBuildSignatureRegex = /sha([0-9]+)sums/g
     const assets: { name: string; url: string }[] = response.assets
 
     const arches: { arch: Arch; sigStart: number; sigEnd: number }[] = []
