@@ -408,6 +408,8 @@ async function updatePackage(
                     ": Nothing changed according to Git, yet we have updated!"
             )
         }
+    } else {
+        console.log(newPkgBuild)
     }
     if (postScript !== null) {
         let env = process.env
