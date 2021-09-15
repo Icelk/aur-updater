@@ -5,7 +5,7 @@ import { execFile } from "child-process-promise"
 let forceUpdate = false
 
 const packageGitPath = "remote"
-const pkgBuildVerRegex = /pkgver=.*/
+const pkgBuildVerRegex = /^pkgver=.*/m
 
 let token: string | null = null
 
@@ -200,11 +200,17 @@ async function updatePackage(
     dryRun: boolean,
     postScript: string | null
 ): Promise<number> {
-    const pkgBuild = (
-        await fs.promises.readFile(`${remotePath}/${pkgBuildPath}`)
-    ).toString("utf8")
+    const pkgBuild = (await fs.promises.readFile(`${remotePath}/${pkgBuildPath}`)).toString("utf8")
+
+    let sameVersion = (pkgBuild.match(pkgBuildVerRegex) ?? [""])[0].includes(newTag)
+
     // Update PKGBUILD pkgver
     let newPkgBuild = pkgBuild.replace(pkgBuildVerRegex, `pkgver=${newTag}`)
+    if (!sameVersion) {
+        newPkgBuild = newPkgBuild.replace(/^pkgrel=.*/m, "pkgrel=1")
+    } else {
+        console.log("Did not reset pkgrel, we are force-updating the same version.")
+    }
 
     const signatureRegex = new RegExp(regex)
     const pkgBuildSumRegex = /sha([0-9]+)sums/g
