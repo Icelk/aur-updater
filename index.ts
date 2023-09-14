@@ -149,7 +149,8 @@ async function processPackage(config: any): Promise<number> {
         console.error(JSON.stringify(await githubResponse.json(), null, 2))
         return 1
     }
-    const githubData = await githubResponse.json()
+    const githubData: { tag_name: string } =
+        (await githubResponse.json()) as any
     const remoteTag = githubData.tag_name
     const update = remoteTag !== latestSynced || forceUpdate
 
