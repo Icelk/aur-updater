@@ -1,10 +1,8 @@
 {
     "compilerOptions": {
-        "module": "CommonJS",
-        "lib": [
-            "ESNext"
-        ],
-        "watch": true,
+        "module": "nodenext",
+	"moduleResolution": "nodenext",
+        "lib": ["esnext"],
         "strict": true,
         "downlevelIteration": true,
     },
